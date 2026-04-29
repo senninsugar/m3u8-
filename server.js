@@ -13,31 +13,38 @@ const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || "https://proxy-siawaseok.duckdns.org";
 const CONFIG_URL = "https://raw.githubusercontent.com/siawaseok3/wakame/master/video_config.json";
 
-// Environmentから取得したNetscape形式のCookieをytdlが読める形式に変換
+// Netscape形式のCookieを解析
 const parseCookies = (txt) => {
-  if (!txt) return "";
+  if (!txt) return [];
   return txt.split('\n')
     .filter(line => line.trim() && !line.startsWith('#'))
     .map(line => {
       const parts = line.split('\t');
       if (parts.length >= 7) {
-        return `${parts[5]}=${parts[6].trim()}`;
+        return {
+          name: parts[5],
+          value: parts[6].trim(),
+          domain: parts[0],
+          path: parts[2]
+        };
       }
       return null;
     })
-    .filter(Boolean)
-    .join('; ');
+    .filter(Boolean);
 };
 
-const YOUTUBE_COOKIE = parseCookies(process.env.YOUTUBE_COOKIES_TXT);
+// 最新のytdl-core仕様に基づいたAgent作成
+const cookies = parseCookies(process.env.YOUTUBE_COOKIES_TXT);
+const agent = ytdl.createAgent(cookies);
 
-// YouTubeに送るリクエスト設定
 const YTDL_OPTIONS = {
+  agent,
+  // 複数のクライアントを試すことで解析エラーを回避
+  playerClients: ['WEB_EMBEDDED_PLAYER', 'IOS', 'ANDROID', 'TV'],
   requestOptions: {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
       'Accept-Language': 'ja-JP,ja;q=0.9',
-      'Cookie': YOUTUBE_COOKIE
     }
   }
 };
@@ -72,22 +79,32 @@ app.get("/api/video/download/:id", validateYouTubeId, async (req, res) => {
     const result = { "audio only": [], "video only": [], "audio&video": [], "m3u8 raw": [], "m3u8 proxy": [] };
     
     if (!info.formats || info.formats.length === 0) {
-      console.warn("[Warn] フォーマットが見つかりません");
       return res.status(404).json({ error: "No formats found" });
     }
 
     for (const f of info.formats) {
       if (!f.url) continue;
       const url = f.url.toLowerCase();
-      if (url.includes("lang=") && !url.includes("lang=ja")) continue;
+      
+      // m3u8形式の判定を強化
+      const isM3U8 = url.includes("m3u8") || f.protocol === 'm3u8-fast' || f.isHLS;
 
-      if (url.endsWith(".m3u8") || f.protocol === 'm3u8-fast') {
-        const m3u8Data = { url: f.url, resolution: f.resolution || f.qualityLabel, vcodec: f.vcodec, acodec: f.acodec };
+      if (isM3U8) {
+        const m3u8Data = { 
+          url: f.url, 
+          quality: f.qualityLabel || f.quality, 
+          vcodec: f.vcodec, 
+          acodec: f.acodec 
+        };
         result["m3u8 raw"].push(m3u8Data);
-        result["m3u8 proxy"].push({ ...m3u8Data, url: `${BASE_URL}/proxy/m3u8?url=${encodeURIComponent(f.url)}` });
+        result["m3u8 proxy"].push({ 
+          ...m3u8Data, 
+          url: `${BASE_URL}/proxy/m3u8?url=${encodeURIComponent(f.url)}` 
+        });
         continue;
       }
-      if (f.resolution === "audio only" || !f.hasVideo) result["audio only"].push(f);
+
+      if (!f.hasVideo) result["audio only"].push(f);
       else if (!f.hasAudio) result["video only"].push(f);
       else result["audio&video"].push(f);
     }
@@ -96,7 +113,11 @@ app.get("/api/video/download/:id", validateYouTubeId, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("❌ Download Error:", err.message);
-    res.status(500).json({ error: "Internal server error", details: err.message });
+    res.status(500).json({ 
+      error: "Internal server error", 
+      details: err.message,
+      tip: "If 403 or Decipher error, update ytdl-core or check cookies." 
+    });
   }
 });
 

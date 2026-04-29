@@ -13,12 +13,31 @@ const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || "https://proxy-siawaseok.duckdns.org";
 const CONFIG_URL = "https://raw.githubusercontent.com/siawaseok3/wakame/master/video_config.json";
 
+// Environmentから取得したNetscape形式のCookieをytdlが読める形式に変換
+const parseCookies = (txt) => {
+  if (!txt) return "";
+  return txt.split('\n')
+    .filter(line => line.trim() && !line.startsWith('#'))
+    .map(line => {
+      const parts = line.split('\t');
+      if (parts.length >= 7) {
+        return `${parts[5]}=${parts[6].trim()}`;
+      }
+      return null;
+    })
+    .filter(Boolean)
+    .join('; ');
+};
+
+const YOUTUBE_COOKIE = parseCookies(process.env.YOUTUBE_COOKIES_TXT);
+
 // YouTubeに送るリクエスト設定
 const YTDL_OPTIONS = {
   requestOptions: {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
       'Accept-Language': 'ja-JP,ja;q=0.9',
+      'Cookie': YOUTUBE_COOKIE
     }
   }
 };

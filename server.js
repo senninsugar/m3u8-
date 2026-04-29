@@ -1,3 +1,4 @@
+process.env.YTDL_NO_UPDATE = '1'; // 自動アップデートチェックを停止して403エラーを回避
 import express from "express";
 import https from "https";
 import fetch from "node-fetch";
